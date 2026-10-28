@@ -1,7 +1,7 @@
 {
   "name": "WIHOK ONE APP",
-  "short_name": "WIHOK ONE APP",
-  "description": "รวมแอป Google Apps Script ไว้ในที่เดียว",
+  "short_name": "WIHOK ONE",
+  "description": "รวมแอป WIHOK ไว้ในที่เดียว",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
