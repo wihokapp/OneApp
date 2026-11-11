@@ -144,7 +144,11 @@
     width: 100%; padding: 11px 12px; border-radius: 10px;
     background: var(--bg); border: 1px solid var(--line); outline: none; font-size: 16px;
   }
-  .field input:focus { border-color: var(--accent); }
+  .field input:focus, .field select:focus { border-color: var(--accent); }
+  .field select {
+    width: 100%; padding: 11px 12px; border-radius: 10px; font-size: 16px;
+    background: var(--bg); border: 1px solid var(--line); outline: none;
+  }
   .row { display: flex; gap: 10px; }
   .row .field { flex: 1; }
   .field input[type=color] { padding: 4px; height: 44px; }
@@ -278,6 +282,19 @@
     <div class="field">
       <label>URL ของแอป</label>
       <input id="fUrl" type="url" required placeholder="https://script.google.com/macros/s/…/exec">
+    </div>
+    <div class="field">
+      <label>ขนาดการแสดงผล (ลดลงถ้าหน้าเว็บดูใหญ่หรือล้นจอ)</label>
+      <select id="fZoom">
+        <option value="100">100% (ปกติ)</option>
+        <option value="90">90%</option>
+        <option value="80">80%</option>
+        <option value="75">75%</option>
+        <option value="67">67%</option>
+        <option value="60">60%</option>
+        <option value="50">50%</option>
+        <option value="40">40%</option>
+      </select>
     </div>
     <div class="field">
       <label>PIN สำหรับเข้าแอปนี้ (ตัวเลข 4–8 หลัก เว้นว่าง = ไม่ล็อก)</label>
@@ -432,6 +449,7 @@ function openApp(id, push = true, unlockedUrl = null) {
   } else {
     $('loader').classList.remove('show');
   }
+  applyZoom(f, app.zoom);
   Object.values(frames).forEach(x => x.classList.toggle('active', x === f));
 
   document.body.classList.add('in-app');
@@ -449,6 +467,18 @@ function closeApp() {
   currentAppId = null;
   document.body.classList.remove('in-app');
   $('appview').setAttribute('aria-hidden', 'true');
+}
+// ย่อ/ขยายหน้าเว็บใน iframe: ทำให้ iframe ใหญ่ขึ้นแล้ว scale ลงให้พอดีจอ
+function applyZoom(f, zoom) {
+  const z = Math.min(Math.max(Number(zoom) || 100, 30), 150) / 100;
+  if (z === 1) {
+    f.style.width = f.style.height = f.style.transform = f.style.transformOrigin = '';
+  } else {
+    f.style.width = (100 / z) + '%';
+    f.style.height = (100 / z) + '%';
+    f.style.transform = 'scale(' + z + ')';
+    f.style.transformOrigin = '0 0';
+  }
 }
 function clearHash() {
   if (location.hash) history.replaceState(null, '', location.pathname + location.search);
@@ -564,7 +594,7 @@ function renderDevList() {
   $('devList').innerHTML = draft.map((a, i) => `
     <li>
       <div class="tile" style="background:${esc(a.color)}">${tileInner(a)}</div>
-      <div class="info"><b>${a.pin ? '🔒 ' : ''}${esc(a.name)}</b><span>${esc(a.url)}</span></div>
+      <div class="info"><b>${a.pin ? '🔒 ' : ''}${esc(a.name)}${Number(a.zoom) && Number(a.zoom) !== 100 ? ' · ' + Number(a.zoom) + '%' : ''}</b><span>${esc(a.url)}</span></div>
       <button class="mini" data-act="up" data-i="${i}" ${i === 0 ? 'disabled' : ''} aria-label="เลื่อนขึ้น">${ICON_UP}</button>
       <button class="mini" data-act="down" data-i="${i}" ${i === draft.length - 1 ? 'disabled' : ''} aria-label="เลื่อนลง">${ICON_DOWN}</button>
       <button class="mini" data-act="edit" data-i="${i}" aria-label="แก้ไข">${ICON_EDIT}</button>
@@ -619,6 +649,9 @@ function openEdit(i) {
   $('fName').value = a.name; $('fUrl').value = a.url;
   $('fIcon').value = a.icon; $('fColor').value = a.color || '#2563eb';
   $('fPin').value = a.pin || '';
+  const zoom = String(Number(a.zoom) || 100);
+  if (![...$('fZoom').options].some(o => o.value === zoom)) $('fZoom').add(new Option(zoom + '%', zoom));
+  $('fZoom').value = zoom;
   $('delBtn').style.display = i >= 0 ? '' : 'none';
   $('editMsg').textContent = '';
   updatePreview();
@@ -637,6 +670,7 @@ $('editForm').addEventListener('submit', e => {
     icon: $('fIcon').value.trim(),
     color: $('fColor').value,
     pin,
+    zoom: Number($('fZoom').value) || 100,
   };
   if (editingIndex >= 0) draft[editingIndex] = item; else draft.push(item);
   renderDevList();
