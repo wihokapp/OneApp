@@ -69,6 +69,19 @@
     transition: transform .15s;
   }
   .app:active .tile { transform: scale(.9); }
+  .tile-wrap { position: relative; }
+  .lock-badge {
+    position: absolute; right: -5px; bottom: -5px;
+    width: 24px; height: 24px; border-radius: 50%;
+    background: #0f172a; border: 2px solid rgba(255,255,255,.85);
+    display: grid; place-items: center;
+  }
+  .lock-badge svg { width: 12px; height: 12px; stroke: #fff; fill: none; stroke-width: 2.5; }
+  .unlock-tile { width: 64px; height: 64px; border-radius: 18px; margin: 0 auto 12px;
+    display: grid; place-items: center; font-size: 32px; overflow: hidden; }
+  .unlock-tile img { width: 100%; height: 100%; object-fit: cover; }
+  #unlockForm h2, #unlockForm .hint { text-align: center; }
+  #unlockInput { text-align: center; letter-spacing: .5em; font-size: 22px; }
   .app .tile img { width: 100%; height: 100%; object-fit: cover; }
   .app .label {
     font-size: 12px; line-height: 1.3; text-align: center; max-width: 80px;
@@ -220,6 +233,23 @@
   </form>
 </div>
 
+<!-- ===== ใส่ PIN ของแอปที่ล็อกไว้ ===== -->
+<div class="sheet-backdrop" id="unlockSheet">
+  <form class="sheet" id="unlockForm" autocomplete="off">
+    <div class="unlock-tile" id="unlockTile"></div>
+    <h2 id="unlockTitle"></h2>
+    <p class="hint">แอปนี้ล็อกไว้ ใส่ PIN เพื่อเข้าใช้งาน</p>
+    <div class="field">
+      <input type="password" id="unlockInput" inputmode="numeric" maxlength="8" placeholder="PIN" required>
+    </div>
+    <div class="msg" id="unlockMsg" style="text-align:center"></div>
+    <div class="actions">
+      <button type="button" class="btn" data-close>ยกเลิก</button>
+      <button type="submit" class="btn primary" id="unlockOk">เปิดแอป</button>
+    </div>
+  </form>
+</div>
+
 <!-- ===== แผงจัดการแอป ===== -->
 <div class="sheet-backdrop" id="devSheet">
   <div class="sheet">
@@ -239,15 +269,19 @@
 <div class="sheet-backdrop" id="editSheet">
   <form class="sheet" id="editForm" autocomplete="off">
     <h2 id="editTitle">เพิ่มแอป</h2>
-    <p class="hint">URL ต้องเป็นลิงก์ Web App ที่ลงท้ายด้วย /exec</p>
+    <p class="hint">ใส่ลิงก์ Apps Script (/exec), Google Form, Sheet หรือเว็บอื่นที่ขึ้นต้นด้วย https://</p>
     <div class="preview-tile" id="preview"></div>
     <div class="field">
       <label>ชื่อแอป</label>
       <input id="fName" maxlength="30" required placeholder="เช่น ลงเวลาทำงาน">
     </div>
     <div class="field">
-      <label>URL ของ Apps Script</label>
+      <label>URL ของแอป</label>
       <input id="fUrl" type="url" required placeholder="https://script.google.com/macros/s/…/exec">
+    </div>
+    <div class="field">
+      <label>PIN สำหรับเข้าแอปนี้ (ตัวเลข 4–8 หลัก เว้นว่าง = ไม่ล็อก)</label>
+      <input id="fPin" inputmode="numeric" maxlength="8" placeholder="ไม่ล็อก" autocomplete="off">
     </div>
     <div class="row">
       <div class="field">
@@ -276,7 +310,7 @@
    ตั้งค่า: วาง URL ของ Apps Script ตัวกลาง (ไฟล์ backend/Code.gs) ตรงนี้
    ถ้าเว้นว่างไว้ ระบบจะทำงานแบบ "โหมดทดลอง" เก็บข้อมูลในเครื่องนี้เท่านั้น
    ===================================================================== */
-const API_URL = 'https://script.google.com/macros/s/AKfycbyV8qTjhvVedNVwfMh5ANeaDLGrro3YkvhV0OOnn8P9jRrOdzK1sHnYhQiZuq80sdZN2w/exec';
+const API_URL = '';
 
 const CACHE_KEY = 'launcher.apps.v1';
 const DEMO_PIN = '1234';
@@ -338,11 +372,16 @@ function renderGrid() {
     return;
   }
   grid.innerHTML = apps.map(a => `
-    <button class="app" data-id="${esc(a.id)}">
-      <div class="tile" style="background:${esc(a.color || '#2563eb')}">${tileInner(a)}</div>
+    <button class="app" data-id="${esc(a.id)}"${isLocked(a) ? ' aria-label="' + esc(a.name) + ' (ล็อกด้วย PIN)"' : ''}>
+      <div class="tile-wrap">
+        <div class="tile" style="background:${esc(a.color || '#2563eb')}">${tileInner(a)}</div>
+        ${isLocked(a) ? `<span class="lock-badge">${ICON_LOCK}</span>` : ''}
+      </div>
       <div class="label">${esc(a.name)}</div>
     </button>`).join('');
 }
+const ICON_LOCK = '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
+function isLocked(a) { return !!(a && (a.locked || a.pin)); }
 function setStatus(text) { $('status').textContent = text; }
 
 function toast(text) {
@@ -370,21 +409,24 @@ async function load() {
 }
 
 /* ---------- open / close app ---------- */
-function openApp(id, push = true) {
+function openApp(id, push = true, unlockedUrl = null) {
   const app = apps.find(a => a.id === id);
-  if (!app) return;
+  if (!app) { if (!push) clearHash(); return; }
+  // แอปที่ล็อกไว้: ต้องใส่ PIN ทุกครั้งที่เปิดจากหน้าหลัก
+  if (isLocked(app) && !unlockedUrl) return askUnlock(app, push);
+  const url = unlockedUrl || app.url;
   currentAppId = id;
   $('appTitle').textContent = app.name;
 
   let f = frames[id];
-  if (!f || f.dataset.src !== app.url) {
+  if (!f || f.dataset.src !== url) {
     if (f) f.remove();
     f = document.createElement('iframe');
-    f.dataset.src = app.url;
+    f.dataset.src = url;
     f.allow = 'geolocation; camera; microphone; clipboard-write; fullscreen';
     f.addEventListener('load', () => { if (currentAppId === id) $('loader').classList.remove('show'); });
     $('loader').classList.add('show');
-    f.src = app.url;
+    f.src = url;
     $('frames').appendChild(f);
     frames[id] = f;
   } else {
@@ -397,10 +439,53 @@ function openApp(id, push = true) {
   if (push) history.pushState({ app: id }, '', '#app=' + encodeURIComponent(id));
 }
 function closeApp() {
+  // แอปที่ล็อกไว้: ปิดแล้วล้างหน้าทิ้ง ไม่ค้างไว้ในหน่วยความจำ
+  const prev = apps.find(a => a.id === currentAppId);
+  if (isLocked(prev) && frames[prev.id]) {
+    const f = frames[prev.id];
+    delete frames[prev.id];
+    setTimeout(() => f.remove(), 400);
+  }
   currentAppId = null;
   document.body.classList.remove('in-app');
   $('appview').setAttribute('aria-hidden', 'true');
 }
+function clearHash() {
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+}
+
+/* ---------- unlock locked app ---------- */
+let pendingUnlock = null;
+function askUnlock(app, push) {
+  pendingUnlock = { app, push };
+  $('unlockTitle').textContent = app.name;
+  $('unlockTile').style.background = app.color || '#2563eb';
+  $('unlockTile').innerHTML = tileInner(app);
+  $('unlockInput').value = ''; $('unlockMsg').textContent = '';
+  showSheet('unlockSheet');
+  setTimeout(() => $('unlockInput').focus(), 100);
+}
+$('unlockForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (!pendingUnlock) return;
+  const { app, push } = pendingUnlock;
+  const pin = $('unlockInput').value.trim();
+  $('unlockOk').disabled = true; $('unlockMsg').textContent = '';
+  try {
+    let url;
+    if (API_URL) url = (await apiPost({ action: 'unlock', id: app.id, pin })).url;
+    else if (pin === app.pin) url = app.url;
+    else throw new Error('PIN ไม่ถูกต้อง');
+    pendingUnlock = null;
+    hideSheet('unlockSheet');
+    openApp(app.id, push, url);
+  } catch (err) {
+    $('unlockMsg').textContent = err.message;
+    $('unlockInput').select();
+  } finally {
+    $('unlockOk').disabled = false;
+  }
+});
 function routeFromHash() {
   const m = location.hash.match(/^#app=(.+)$/);
   if (m) openApp(decodeURIComponent(m[1]), false); else closeApp();
@@ -422,7 +507,14 @@ window.addEventListener('popstate', routeFromHash);
 
 /* ---------- sheets ---------- */
 function showSheet(id) { $(id).classList.add('show'); }
-function hideSheet(id) { $(id).classList.remove('show'); }
+function hideSheet(id) {
+  $(id).classList.remove('show');
+  // ยกเลิกการใส่ PIN ตอนเปิดจากลิงก์ #app=… ให้กลับหน้าหลัก
+  if (id === 'unlockSheet' && !document.body.classList.contains('in-app')) {
+    pendingUnlock = null;
+    clearHash();
+  }
+}
 document.querySelectorAll('[data-close]').forEach(b =>
   b.addEventListener('click', () => hideSheet(b.closest('.sheet-backdrop').id)));
 document.querySelectorAll('.sheet-backdrop').forEach(bd =>
@@ -441,11 +533,12 @@ $('pinForm').addEventListener('submit', async e => {
   const pin = $('pinInput').value.trim();
   $('pinOk').disabled = true; $('pinMsg').textContent = '';
   try {
-    if (API_URL) await apiPost({ action: 'verify', pin });
+    let full = null;
+    if (API_URL) full = (await apiPost({ action: 'list', pin })).apps;
     else if (pin !== DEMO_PIN) throw new Error('PIN ไม่ถูกต้อง');
     devPin = pin;
     hideSheet('pinSheet');
-    openDev();
+    openDev(full);
   } catch (err) {
     $('pinMsg').textContent = err.message;
   } finally {
@@ -453,8 +546,13 @@ $('pinForm').addEventListener('submit', async e => {
   }
 });
 
-function openDev() {
-  draft = apps.map(a => ({ ...a }));
+// โหมดผู้พัฒนาต้องใช้รายการเต็ม (มี URL และ PIN ของแอปที่ล็อกไว้) ซึ่งขอจากเซิร์ฟเวอร์ด้วย PIN ผู้พัฒนา
+async function openDev(full = null) {
+  if (!full && API_URL) {
+    try { full = (await apiPost({ action: 'list', pin: devPin })).apps; }
+    catch (err) { devPin = null; toast(err.message); return; }
+  }
+  draft = (full || apps).map(a => ({ ...a }));
   $('devMsg').textContent = '';
   renderDevList();
   showSheet('devSheet');
@@ -466,7 +564,7 @@ function renderDevList() {
   $('devList').innerHTML = draft.map((a, i) => `
     <li>
       <div class="tile" style="background:${esc(a.color)}">${tileInner(a)}</div>
-      <div class="info"><b>${esc(a.name)}</b><span>${esc(a.url)}</span></div>
+      <div class="info"><b>${a.pin ? '🔒 ' : ''}${esc(a.name)}</b><span>${esc(a.url)}</span></div>
       <button class="mini" data-act="up" data-i="${i}" ${i === 0 ? 'disabled' : ''} aria-label="เลื่อนขึ้น">${ICON_UP}</button>
       <button class="mini" data-act="down" data-i="${i}" ${i === draft.length - 1 ? 'disabled' : ''} aria-label="เลื่อนลง">${ICON_DOWN}</button>
       <button class="mini" data-act="edit" data-i="${i}" aria-label="แก้ไข">${ICON_EDIT}</button>
@@ -520,6 +618,7 @@ function openEdit(i) {
   $('editTitle').textContent = i >= 0 ? 'แก้ไขแอป' : 'เพิ่มแอป';
   $('fName').value = a.name; $('fUrl').value = a.url;
   $('fIcon').value = a.icon; $('fColor').value = a.color || '#2563eb';
+  $('fPin').value = a.pin || '';
   $('delBtn').style.display = i >= 0 ? '' : 'none';
   $('editMsg').textContent = '';
   updatePreview();
@@ -529,12 +628,15 @@ $('editForm').addEventListener('submit', e => {
   e.preventDefault();
   const url = $('fUrl').value.trim();
   if (!/^https:\/\//i.test(url)) { $('editMsg').textContent = 'URL ต้องขึ้นต้นด้วย https://'; return; }
+  const pin = $('fPin').value.trim();
+  if (pin && !/^\d{4,8}$/.test(pin)) { $('editMsg').textContent = 'PIN ต้องเป็นตัวเลข 4–8 หลัก'; return; }
   const item = {
     id: editingIndex >= 0 ? draft[editingIndex].id : 'a' + Date.now().toString(36),
     name: $('fName').value.trim(),
     url,
     icon: $('fIcon').value.trim(),
     color: $('fColor').value,
+    pin,
   };
   if (editingIndex >= 0) draft[editingIndex] = item; else draft.push(item);
   renderDevList();
