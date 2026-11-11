@@ -1,6 +1,6 @@
 // Service worker: เก็บหน้า Launcher ไว้ในเครื่อง ให้เปิดได้เร็วและเปิดได้แม้ออฟไลน์
 // เมื่อแก้ไฟล์ index.html แล้ว ให้เปลี่ยนเลขเวอร์ชันนี้ เพื่อให้ผู้ใช้ได้ไฟล์ใหม่
-const VERSION = 'launcher-v4';
+const VERSION = 'launcher-v5';
 const SHELL = ['./', 'index.html', 'manifest.json', 'icons/icon-192.png', 'icons/icon-512.png',
   'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png'];
 
